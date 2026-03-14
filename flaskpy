@@ -1,0 +1,197 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import mysql.connector
+
+app = Flask(__name__)
+CORS(app)
+
+def get_db():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="kvclri",
+        database="aman_university_db"
+    )
+
+def init_db():
+    conn = mysql.connector.connect(host="localhost", user="root", password="kvclri")
+    cursor = conn.cursor()
+    cursor.execute("CREATE DATABASE IF NOT EXISTS aman_university_db")
+    cursor.execute("USE aman_university_db")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS students (
+            student_id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(50),
+            department VARCHAR(50),
+            rollnumber VARCHAR(100) UNIQUE,
+            year INT,
+            email VARCHAR(100)
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS teachers (
+            teacher_id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(50),
+            department VARCHAR(50),
+            email VARCHAR(100),
+            salary INT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            sno INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(100) UNIQUE,
+            password VARCHAR(100)
+        )
+    """)
+    # Insert default admin user if not exists
+    cursor.execute("SELECT * FROM users WHERE username='admin'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (username, password) VALUES ('admin', 'admin123')")
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+# authorisation karega yahan se
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s",
+                   (data['username'], data['password']))
+    user = cursor.fetchone()
+    cursor.close(); conn.close()
+    if user:
+        return jsonify({"success": True, "username": user['username']})
+    return jsonify({"success": False, "message": "Invalid username or password"}), 401
+
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    data = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)",
+                       (data['username'], data['password']))
+        conn.commit()
+        cursor.close(); conn.close()
+        return jsonify({"success": True})
+    except mysql.connector.IntegrityError:
+        cursor.close(); conn.close()
+        return jsonify({"success": False, "message": "Username already taken"}), 409
+
+@app.route('/api/users/count', methods=['GET'])
+def users_count():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
+    cursor.close(); conn.close()
+    return jsonify({"count": count})
+
+#students lega
+@app.route('/api/students', methods=['GET'])
+def get_students():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM students")
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/students', methods=['POST'])
+def add_student():
+    d = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO students (name, department, rollnumber, year, email) VALUES (%s,%s,%s,%s,%s)",
+            (d['name'], d['department'], d['rollnumber'], d['year'], d['email'])
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+        cursor.close(); conn.close()
+        return jsonify({"success": True, "student_id": new_id})
+    except mysql.connector.IntegrityError:
+        cursor.close(); conn.close()
+        return jsonify({"success": False, "message": "Roll number already exists"}), 409
+
+@app.route('/api/students/<int:sid>', methods=['PUT'])
+def update_student(sid):
+    d = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE students SET name=%s, department=%s, rollnumber=%s, year=%s, email=%s WHERE student_id=%s",
+            (d['name'], d['department'], d['rollnumber'], d['year'], d['email'], sid)
+        )
+        conn.commit()
+        cursor.close(); conn.close()
+        return jsonify({"success": True})
+    except mysql.connector.IntegrityError:
+        cursor.close(); conn.close()
+        return jsonify({"success": False, "message": "Roll number already in use"}), 409
+
+@app.route('/api/students/<int:sid>', methods=['DELETE'])
+def delete_student(sid):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM students WHERE student_id=%s", (sid,))
+    conn.commit()
+    cursor.close(); conn.close()
+    return jsonify({"success": True})
+
+@app.route('/api/teachers', methods=['GET'])
+def get_teachers():
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM teachers")
+    rows = cursor.fetchall()
+    cursor.close(); conn.close()
+    return jsonify(rows)
+
+@app.route('/api/teachers', methods=['POST'])
+def add_teacher():
+    d = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO teachers (name, department, email, salary) VALUES (%s,%s,%s,%s)",
+        (d['name'], d['department'], d['email'], d['salary'])
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    cursor.close(); conn.close()
+    return jsonify({"success": True, "teacher_id": new_id})
+
+@app.route('/api/teachers/<int:tid>', methods=['PUT'])
+def update_teacher(tid):
+    d = request.json
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE teachers SET name=%s, department=%s, email=%s, salary=%s WHERE teacher_id=%s",
+        (d['name'], d['department'], d['email'], d['salary'], tid)
+    )
+    conn.commit()
+    cursor.close(); conn.close()
+    return jsonify({"success": True})
+
+@app.route('/api/teachers/<int:tid>', methods=['DELETE'])
+def delete_teacher(tid):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM teachers WHERE teacher_id=%s", (tid,))
+    conn.commit()
+    cursor.close(); conn.close()
+    return jsonify({"success": True})
+
+if __name__ == '__main__':
+    print("Initialising database...")
+    init_db()
+    print("Starting Aman University server at http://localhost:5000")
+    app.run(debug=True, port=5000)
